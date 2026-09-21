@@ -9,6 +9,14 @@
     "status": "docker compose ps",
     "logs": "docker compose logs -f",
     "update": "docker compose pull && docker compose up -d",
-    "config": "docker compose config"
+    "config": "docker compose config",
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }
