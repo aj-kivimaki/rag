@@ -1,0 +1,14 @@
+{
+  "name": "rag",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "docker compose up -d",
+    "stop": "docker compose down",
+    "restart": "docker compose restart",
+    "status": "docker compose ps",
+    "logs": "docker compose logs -f",
+    "update": "docker compose pull && docker compose up -d",
+    "config": "docker compose config"
+  }
+}
