@@ -95,15 +95,32 @@ The LLM can be swapped independently of the embedding model. Smaller models are 
 
 ## Model Comparison
 
-The same RAG question was tested with three local LLMs using the same n8n workflow, Supabase knowledge base, and embedding model.
+The same RAG question was tested with three local Ollama models using the same document and n8n workflow.
 
-| Model | Size | Approx. execution time | Result |
-|---|---:|---:|---|
-| Llama 3.1 | 8B | ~5 min 5 sec | Correctly retrieved and summarized the document |
-| Llama 3.2 | 3B | ~2 min 26 sec | Correctly retrieved and summarized the document |
-| Qwen3 | 1.7B | ~2 min 0 sec | Retrieved the document and produced a usable answer |
+| Model     | Size |  Approx. time | Result                                              |
+| --------- | ---: | ------------: | --------------------------------------------------- |
+| Llama 3.1 |   8B |  ~5 min 5 sec | Correctly retrieved and summarized the document     |
+| Llama 3.2 |   3B | ~2 min 26 sec | Correctly retrieved and summarized the document     |
+| Qwen3     | 1.7B |  ~2 min 0 sec | Retrieved the document and produced a usable answer |
 
-The smaller models were substantially faster on the Intel Mac. All three tests successfully used the Supabase Vector Store to retrieve relevant document content.
+### Qwen3 performance optimization
+
+Further testing was done with `qwen3:1.7b`:
+
+- **Thinking disabled** — removed the `<think>` output and slightly reduced generation time.
+- **Vector Store limit reduced from 4 to 2 chunks** — reduced the AI Agent execution from roughly 64 seconds to roughly 34–40 seconds in the tested RAG queries.
+- Token usage dropped from roughly 2,000 tokens to roughly 1,100–1,300 tokens.
+- Two retrieved chunks were sufficient for the tested questions while maintaining relevant, document-grounded answers.
+- Some questions may be answered directly by the agent without calling the Vector Store, so those very fast responses are not considered valid RAG performance measurements.
+
+Current RAG settings:
+
+- Model: `qwen3:1.7b`
+- Thinking: disabled
+- Vector Store retrieval limit: 2 chunks
+- Response format: 3–5 concise bullet points
+
+These settings provide a practical balance between retrieval quality and response time on the local Intel Mac setup.
 
 ## Supabase
 
