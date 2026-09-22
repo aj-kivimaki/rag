@@ -52,3 +52,6 @@ n8n/data/
 *.tmp
 *.swp
 *.swo
+
+# RAG source documents
+documents/

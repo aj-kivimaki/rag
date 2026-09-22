@@ -14,59 +14,70 @@ The goal is to build and understand a complete RAG workflow using local AI model
 
 ## Current Status
 
-- [x] Local n8n running in Docker
+### Completed
+
+- [x] Local n8n running in Docker/Colima
 - [x] Ollama running locally
 - [x] Ollama accessible from n8n
 - [x] n8n Chat Trigger
 - [x] n8n AI Agent
-- [x] Ollama Chat Model connected
-- [x] `llama3:1:8b` and `llama3.2:3b` installed
+- [x] Ollama Chat Model
+- [x] `llama3.2:3b` installed
+- [x] `qwen3:1.7b` installed
 - [x] `nomic-embed-text` installed
 - [x] Supabase / pgvector
-- [x] Document ingestion
+- [x] Document ingestion from PDF
+- [x] Document loading and text splitting
 - [x] Vector embeddings
-- [x] Vector retrieval
+- [x] Vector retrieval through Supabase Vector Store
 - [x] AI Agent retrieval tool
-- [ ] Chat memory
-- [x] Complete end-to-end RAG workflow
+- [x] End-to-end RAG question answering
 
-## Current Workflows
+### Remaining
+
+- [ ] Postgres Chat Memory
+- [ ] Delete existing document vectors before re-ingesting updated documents
+- [ ] Remove the initial test row from the `documents` table
+
+## Workflows
 
 ### RAG - Chat
 
 ```text
-Chat Trigger
-     ↓
-  AI Agent
-     ↓
-Supabase Vector Store
-     ↓
-Relevant document chunks
-     ↓
-Ollama Chat Model
-     ↓
-    Answer
+When chat message received
+          ↓
+       AI Agent
+       ↙      ↘
+Ollama Chat   Supabase Vector Store
+   Model              ↓
+       ↘       Relevant chunks
+        ↘           ↓
+         ─────→ AI Agent
+                    ↓
+                 Answer
 ```
 
-The AI Agent uses the Supabase Vector Store as a tool for retrieving relevant information from the knowledge base.
+The AI Agent uses the Supabase Vector Store as a retrieval tool. Ollama provides the chat model, while `nomic-embed-text` converts the user's query into an embedding for vector search.
 
 ### RAG - Ingest Documents
 
 ```text
 Manual Trigger
-     ↓
-Edit Fields
-     ↓
+      ↓
+Read/Write Files from Disk
+      ↓
 Default Data Loader
-     ↓
+      ↓
 Text splitting
-     ↓
+      ↓
 Ollama Embeddings
-     ↓
-Supabase / pgvector
+      ↓
+Supabase Vector Store
 ```
 
-The ingestion workflow currently uses the `documents` table in Supabase and `nomic-embed-text` for 768-dimensional embeddings.
+Documents are loaded from the local `documents/` directory.
+
+A test PDF (`test-document.pdf`) was successfully split into chunks and stored in the Supabase `documents` table with 768-dimensional embeddings.
 
 ## Local AI
 
@@ -75,28 +86,42 @@ Ollama runs directly on the Mac.
 Current models:
 
 ```text
-llama3.1:8b       → LLM
 llama3.2:3b       → LLM
+qwen3:1.7b        → smaller LLM for CPU testing
 nomic-embed-text  → embeddings
 ```
 
-## Supabase
+The LLM can be swapped independently of the embedding model. Smaller models are being tested because LLM inference is CPU-bound on the current Intel Mac.
 
-The project uses PostgreSQL with the `pgvector` extension.
+## Model Comparison
+
+The same RAG question was tested with three local LLMs using the same n8n workflow, Supabase knowledge base, and embedding model.
+
+| Model | Size | Approx. execution time | Result |
+|---|---:|---:|---|
+| Llama 3.1 | 8B | ~5 min 5 sec | Correctly retrieved and summarized the document |
+| Llama 3.2 | 3B | ~2 min 26 sec | Correctly retrieved and summarized the document |
+| Qwen3 | 1.7B | ~2 min 0 sec | Retrieved the document and produced a usable answer |
+
+The smaller models were substantially faster on the Intel Mac. All three tests successfully used the Supabase Vector Store to retrieve relevant document content.
+
+## Supabase
 
 The `documents` table stores:
 
-- document content
+- document chunk content
 - metadata
 - 768-dimensional embeddings
 
-Vector similarity search is used to retrieve relevant document chunks for the AI Agent.
+Vector similarity search is exposed through the `match_documents` function and the n8n Supabase Vector Store node.
 
 ## Project Structure
 
 ```text
 rag/
 ├── app/
+│   └── main.py
+├── documents/
 ├── n8n/
 │   └── data/
 ├── .venv/
@@ -107,9 +132,11 @@ rag/
 └── ARCHITECTURE.md
 ```
 
+The `documents/` directory is excluded from Git because source documents are local knowledge-base data.
+
 ## Running
 
-Start Colima if needed:
+Start Colima with the required port forwarder:
 
 ```bash
 colima start --port-forwarder=grpc
@@ -121,25 +148,29 @@ Start n8n:
 docker compose up -d
 ```
 
-Open:
-
-```text
-http://localhost:5678
-```
-
 Start Ollama:
 
 ```bash
 ollama serve
 ```
 
-Check installed models:
+Open n8n:
+
+```text
+http://localhost:5678
+```
+
+Check Ollama:
 
 ```bash
 ollama list
 ollama ps
 ```
 
-## Architecture
+## Remaining Work
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the current and planned architecture.
+The core RAG pipeline is working. The remaining pieces are mainly conversation memory and safe re-ingestion of updated documents:
+
+1. Add **Postgres Chat Memory** to the AI Agent.
+2. Add a document update/re-ingestion strategy that removes existing vectors before inserting new chunks.
+3. Remove the original test row from the Supabase `documents` table.
