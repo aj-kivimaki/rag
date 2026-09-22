@@ -1,43 +1,38 @@
-# RAG
+# Local RAG
 
-A Retrieval-Augmented Generation project built with **n8n, Ollama, Supabase, and Python**.
+A local Retrieval-Augmented Generation (RAG) project built with **n8n, Ollama, Supabase/pgvector, and Python**.
 
-The goal is to build and understand a complete RAG workflow using local AI models where practical.
+The project focuses on understanding and building a practical RAG pipeline with local AI models, document ingestion, vector retrieval, and conversational memory.
 
 ## Stack
 
-- **n8n** — workflow orchestration and AI Agent
-- **Ollama** — local LLMs and embeddings
-- **Supabase / pgvector** — vector storage and retrieval
-- **Python** — application layer and experimentation
-- **Docker / Colima** — local n8n environment
+- **n8n** — workflow orchestration, document ingestion, AI Agent, retrieval, and memory
+- **Ollama** — local LLM inference and embeddings
+- **Supabase / PostgreSQL / pgvector** — vector storage, similarity search, and chat memory
+- **Python** — local Ollama experimentation
+- **Docker / Colima** — local n8n environment on macOS
 
 ## Current Status
 
-### Completed
+The core local RAG workflow is working end-to-end.
 
-- [x] Local n8n running in Docker/Colima
+- [x] n8n running locally in Docker/Colima
 - [x] Ollama running locally
-- [x] Ollama accessible from n8n
+- [x] n8n → Ollama connection
 - [x] n8n Chat Trigger
 - [x] n8n AI Agent
-- [x] Ollama Chat Model
-- [x] `llama3.2:3b` installed
-- [x] `qwen3:1.7b` installed
-- [x] `nomic-embed-text` installed
-- [x] Supabase / pgvector
-- [x] Document ingestion from PDF
+- [x] Local chat model with Ollama
+- [x] Local embedding model with Ollama
+- [x] Supabase PostgreSQL + pgvector
+- [x] PDF document ingestion
 - [x] Document loading and text splitting
 - [x] Vector embeddings
-- [x] Vector retrieval through Supabase Vector Store
+- [x] Supabase Vector Store retrieval
 - [x] AI Agent retrieval tool
+- [x] Postgres Chat Memory
+- [x] Multi-document knowledge base
+- [x] Safe document re-ingestion without duplicate vectors
 - [x] End-to-end RAG question answering
-
-### Remaining
-
-- [ ] Postgres Chat Memory
-- [ ] Delete existing document vectors before re-ingesting updated documents
-- [ ] Remove the initial test row from the `documents` table
 
 ## Workflows
 
@@ -47,17 +42,16 @@ The goal is to build and understand a complete RAG workflow using local AI model
 When chat message received
           ↓
        AI Agent
-       ↙      ↘
-Ollama Chat   Supabase Vector Store
-   Model              ↓
-       ↘       Relevant chunks
-        ↘           ↓
-         ─────→ AI Agent
-                    ↓
-                 Answer
+      ↙    ↓     ↘
+ Chat Model  Memory  Vector Store
+    ↓          ↓          ↓
+ Ollama    Supabase    pgvector
+                       + Ollama embeddings
+          ↓
+       Answer
 ```
 
-The AI Agent uses the Supabase Vector Store as a retrieval tool. Ollama provides the chat model, while `nomic-embed-text` converts the user's query into an embedding for vector search.
+The AI Agent uses the Supabase Vector Store as a tool. For document-related questions, the agent is instructed to retrieve relevant context before answering. The chat model is a local Ollama model, and Postgres Chat Memory keeps conversational context between messages.
 
 ### RAG - Ingest Documents
 
@@ -65,72 +59,75 @@ The AI Agent uses the Supabase Vector Store as a retrieval tool. Ollama provides
 Manual Trigger
       ↓
 Read/Write Files from Disk
+      ├──────────────→ Merge (Input 1)
       ↓
-Default Data Loader
-      ↓
-Text splitting
-      ↓
-Ollama Embeddings
-      ↓
-Supabase Vector Store
+Postgres
+      └──────────────→ Merge (Input 2)
+                         ↓
+                    Choose Branch
+                    Wait for both
+                    Output Input 1
+                         ↓
+              Supabase Vector Store
+                 ↑              ↑
+          Data Loader       Embeddings
 ```
 
-Documents are loaded from the local `documents/` directory.
+The ingestion workflow adds a `source` metadata field to each document chunk. Before inserting new vectors, the Postgres node deletes existing chunks belonging to the same source. This makes re-ingestion idempotent: updating or re-running a document does not create duplicate vectors.
 
-A test PDF (`test-document.pdf`) was successfully split into chunks and stored in the Supabase `documents` table with 768-dimensional embeddings.
+Multiple documents can coexist in the same knowledge base. The current test knowledge base contains two PDFs with separate source metadata.
 
 ## Local AI
 
-Ollama runs directly on the Mac.
-
-Current models:
+Ollama runs directly on the Intel Mac and is accessed by the n8n container through:
 
 ```text
-llama3.2:3b       → LLM
-qwen3:1.7b        → smaller LLM for CPU testing
-nomic-embed-text  → embeddings
+http://host.docker.internal:11434
 ```
 
-The LLM can be swapped independently of the embedding model. Smaller models are being tested because LLM inference is CPU-bound on the current Intel Mac.
+Current models used in the project:
 
-## Model Comparison
+```text
+qwen3:1.7b         → current local chat model
+llama3.2:3b        → model comparison
+nomic-embed-text   → embeddings
+```
 
-The same RAG question was tested with three local Ollama models using the same document and n8n workflow.
+The embedding model produces **768-dimensional vectors**.
 
-| Model     | Size |  Approx. time | Result                                              |
-| --------- | ---: | ------------: | --------------------------------------------------- |
-| Llama 3.1 |   8B |  ~5 min 5 sec | Correctly retrieved and summarized the document     |
-| Llama 3.2 |   3B | ~2 min 26 sec | Correctly retrieved and summarized the document     |
-| Qwen3     | 1.7B |  ~2 min 0 sec | Retrieved the document and produced a usable answer |
+### Model Comparison
 
-### Qwen3 performance optimization
+The same RAG question was tested with three local Ollama models using the same document and n8n workflow:
 
-Further testing was done with `qwen3:1.7b`:
+| Model | Size | Approx. time | Result |
+|---|---:|---:|---|
+| Llama 3.1 | 8B | ~5 min 5 sec | Correctly retrieved and summarized the document |
+| Llama 3.2 | 3B | ~2 min 26 sec | Correctly retrieved and summarized the document |
+| Qwen3 | 1.7B | ~2 min 0 sec | Retrieved the document and produced a usable answer |
 
-- **Thinking disabled** — removed the `<think>` output and slightly reduced generation time.
-- **Vector Store limit reduced from 4 to 2 chunks** — reduced the AI Agent execution from roughly 64 seconds to roughly 34–40 seconds in the tested RAG queries.
-- Token usage dropped from roughly 2,000 tokens to roughly 1,100–1,300 tokens.
-- Two retrieved chunks were sufficient for the tested questions while maintaining relevant, document-grounded answers.
-- Some questions may be answered directly by the agent without calling the Vector Store, so those very fast responses are not considered valid RAG performance measurements.
+Further testing with `qwen3:1.7b` showed that performance could be improved by:
 
-Current RAG settings:
+- disabling model thinking
+- reducing Vector Store retrieval from 4 chunks to 2
+- keeping responses concise at 3–5 bullet points
 
-- Model: `qwen3:1.7b`
-- Thinking: disabled
-- Vector Store retrieval limit: 2 chunks
-- Response format: 3–5 concise bullet points
-
-These settings provide a practical balance between retrieval quality and response time on the local Intel Mac setup.
+In tested RAG queries, this reduced execution time to roughly **34–40 seconds** and reduced token usage to roughly **1,100–1,300 tokens**. Exact performance depends on the query and whether the agent decides retrieval is necessary.
 
 ## Supabase
+
+The project uses PostgreSQL with the `pgvector` extension.
 
 The `documents` table stores:
 
 - document chunk content
-- metadata
+- JSON metadata
 - 768-dimensional embeddings
 
-Vector similarity search is exposed through the `match_documents` function and the n8n Supabase Vector Store node.
+Each ingested chunk receives a `source` metadata field, which is used to identify and replace existing vectors during re-ingestion.
+
+Vector similarity search is exposed through the Supabase `match_documents` function and the n8n Supabase Vector Store node.
+
+Supabase PostgreSQL is also used by the n8n Postgres Chat Memory node.
 
 ## Project Structure
 
@@ -149,11 +146,11 @@ rag/
 └── ARCHITECTURE.md
 ```
 
-The `documents/` directory is excluded from Git because source documents are local knowledge-base data.
+The `documents/` directory contains local knowledge-base files and is excluded from Git. Test documents are referred to generically in the project documentation rather than committed to the repository.
 
-## Running
+## Running Locally
 
-Start Colima with the required port forwarder:
+Start Colima with the required gRPC port forwarder:
 
 ```bash
 colima start --port-forwarder=grpc
@@ -184,10 +181,6 @@ ollama list
 ollama ps
 ```
 
-## Remaining Work
+## Architecture
 
-The core RAG pipeline is working. The remaining pieces are mainly conversation memory and safe re-ingestion of updated documents:
-
-1. Add **Postgres Chat Memory** to the AI Agent.
-2. Add a document update/re-ingestion strategy that removes existing vectors before inserting new chunks.
-3. Remove the original test row from the Supabase `documents` table.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the current system architecture and local networking setup.
