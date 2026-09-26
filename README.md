@@ -1,127 +1,115 @@
 # Local RAG
 
-A practical Retrieval-Augmented Generation (RAG) project built with **n8n, Ollama, Supabase/pgvector, and Python**.
+A Retrieval-Augmented Generation (RAG) system built with **n8n, Ollama, and Supabase/pgvector**.
 
-The project explores a complete RAG pipeline with local AI inference, document ingestion, vector retrieval, and conversational memory.
+It ingests PDF documents into a vector database and answers questions about them through a chat interface, using local AI models for both generation and embeddings, plus conversational memory.
 
 ## Stack
 
-- **n8n** — workflow orchestration and AI Agent
-- **Ollama** — local LLM inference and embeddings
-- **Supabase / PostgreSQL / pgvector** — vector storage, similarity search, and chat memory
-- **Python** — local Ollama experimentation
-- **Docker / Colima** — local n8n environment on macOS
+- **n8n**: workflow orchestration and AI Agent
+- **Ollama**: local LLM inference and embeddings
+- **Supabase / PostgreSQL / pgvector**: vector storage, similarity search, and chat memory
+- **Docker / Colima**: local n8n environment on macOS
 
 ## Architecture
 
-The AI components run locally, while Supabase provides the persistent cloud database layer.
+AI inference runs locally. Supabase is cloud-hosted and provides the persistent database layer.
 
 **Local:**
 
 - Ollama and AI models
-- n8n
-- Docker / Colima
-- Python
+- n8n (Docker / Colima)
 - Source documents
 
-**Cloud:**
+**Cloud (Supabase):**
 
-- Supabase PostgreSQL
-- pgvector
+- PostgreSQL + pgvector
 - Document chunks and embeddings
 - Chat memory
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the technical architecture and workflows.
 
-## Current Status
+## Features
 
-The core RAG workflow is working end-to-end.
+- Local LLM inference and embeddings with Ollama (no external LLM API)
+- PDF ingestion, text splitting, and embedding into Supabase pgvector
+- Source metadata on every chunk (the PDF filename)
+- Safe re-ingestion: existing chunks for a document are deleted before it is re-inserted, so there are no duplicate vectors
+- Multiple documents in one knowledge base, ingested one PDF per workflow run
+- AI Agent that uses vector search as a retrieval tool
+- PostgreSQL-backed chat memory
+- End-to-end question answering over the ingested documents
 
-- [x] Local n8n in Docker/Colima
-- [x] Local Ollama inference and embeddings
-- [x] Supabase PostgreSQL + pgvector
-- [x] PDF ingestion and text splitting
-- [x] Vector retrieval through Supabase
-- [x] AI Agent retrieval tool
-- [x] PostgreSQL chat memory
-- [x] Multiple-document knowledge base
-- [x] Safe re-ingestion without duplicate vectors
-- [x] End-to-end RAG question answering
+## Screenshots
 
-The workflow has been tested with multiple documents, re-ingestion, vector retrieval, and conversational memory.
+### RAG Chat workflow
 
-## Workflow Screenshots
+![RAG Chat workflow](pics/RAG-chat-flow.png)
 
-### RAG Chat
+### Document Ingestion workflow
 
-![RAG Chat workflow](pics/RAG-chat.png)
+![RAG Document Ingestion workflow](pics/RAG-ingest-documents-flow.png)
 
-### Document Ingestion
+### Example response
 
-![RAG Document Ingestion workflow](pics/RAG-ingest-documents.png)
+![RAG response](pics/RAG-response.png)
 
-## Local AI
+## Models
 
-The current chat model is `qwen3:1.7b`.
+- Chat: `qwen3:1.7b`
+- Embeddings: `nomic-embed-text` (**768-dimensional vectors**)
 
-Embeddings use `nomic-embed-text`, which produces **768-dimensional vectors**.
-
-Ollama handles both generation and embedding locally. No external LLM API is required.
-
-Other local models were tested during development to compare performance. See [ARCHITECTURE.md](ARCHITECTURE.md) for the measurements.
+Other local models were compared during development. See [ARCHITECTURE.md](ARCHITECTURE.md#models) for the measurements.
 
 ## Project Structure
 
 ```text
 rag/
-├── app/
-│   └── main.py
-├── documents/
-├── n8n/
-│   └── data/
-├── .venv/
-├── docker-compose.yml
-├── requirements.txt
-├── .gitignore
+├── workflows/
+│   ├── rag-chat.json              # n8n chat workflow (AI Agent + retrieval + memory)
+│   └── rag-ingest-documents.json  # n8n ingestion workflow
+├── supabase/
+│   └── schema.sql                 # pgvector extension, documents table, match_documents
+├── pics/                          # screenshots
+├── docker-compose.yml             # local n8n
 ├── README.md
 └── ARCHITECTURE.md
 ```
 
-The `documents/` directory contains local knowledge-base files and is excluded from Git.
+`documents/` (source PDFs) and `n8n/data/` (n8n local state) are created locally and excluded from Git.
 
 ## Running Locally
 
-Start Colima:
+Requirements: Ollama, Colima + Docker, and a Supabase project.
 
-```bash
-colima start --port-forwarder=grpc
-```
+1. Pull the models and start Ollama:
 
-Start n8n:
+   ```bash
+   ollama pull qwen3:1.7b
+   ollama pull nomic-embed-text
+   ollama serve
+   ```
 
-```bash
-docker compose up -d
-```
+2. Apply the database schema: run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL Editor.
 
-Start Ollama:
+3. Put the PDFs to ingest in a local `documents/` directory. It is mounted read-only into n8n at `/home/node/.n8n-files`.
 
-```bash
-ollama serve
-```
+4. Start Colima and n8n:
 
-Open n8n:
+   ```bash
+   colima start --port-forwarder=grpc
+   docker compose up -d
+   ```
 
-```text
-http://localhost:5678
-```
+   Open n8n at `http://localhost:5678`.
 
-Check installed/running models:
+5. Import `workflows/rag-chat.json` and `workflows/rag-ingest-documents.json` (**Workflows → Import from File**).
 
-```bash
-ollama list
-ollama ps
-```
+6. Create the n8n credentials and select them in the workflow nodes:
+   - **Ollama**: base URL `http://host.docker.internal:11434`
+   - **Supabase API**: project URL and service role key
+   - **Postgres**: Supabase database connection details (used for chat memory and for deleting old chunks during ingestion)
 
-## Documentation
+7. Ingest a document: in **RAG - Ingest Documents**, set the file path in the **Read/Write Files from Disk** node (for example `/home/node/.n8n-files/document.pdf`) and execute the workflow. Repeat for each document.
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — technical architecture, workflows, data flow, networking, and implementation details
+8. Ask questions: open **RAG - Chat** and use the n8n chat panel.
