@@ -1,94 +1,100 @@
 # Architecture
 
-This document describes the technical architecture of the current local
-RAG system. The README contains the project overview, status, stack, and
-setup instructions; implementation details belong here.
+This document describes the architecture of the RAG system. The [README](README.md) covers the project overview, setup, and current status.
 
 ## System Architecture
 
 ```text
-                         macOS
-                           │
-             ┌─────────────┴─────────────┐
-             │                           │
-          Ollama                      Colima
-             │                           │
-             │                      Docker / n8n
-             │                           │
-             │                 ┌─────────┴─────────┐
-             │                 │                   │
-             │             RAG - Chat       RAG - Ingest
-             │                 │                   │
-             └──────────────► AI Agent             │
-                               │                   │
-                    ┌──────────┼──────────┐        │
-                    │          │          │        │
-                 Ollama     Postgres   Supabase    │
-                  Chat       Chat       Vector     │
-                  Model     Memory       Store     │
-                                         │         │
-                                 Ollama Embeddings │
+                              macOS
+                                │
+                 ┌──────────────┴──────────────┐
+                 │                             │
+              Ollama                        Colima
+                 │                             │
+          Local AI models                 Docker / n8n
+                 │                             │
+          ┌──────┴──────┐              ┌──────┴──────┐
+          │             │              │             │
+       Qwen3       Nomic Embed      RAG - Chat   RAG - Ingest
+          │             │              │             │
+          │             │           AI Agent         │
+          │             │              │             │
+          └─────────────┼──────────────┼─────────────┘
+                        │              │
+                        │              ▼
+                        │       Supabase PostgreSQL
+                        │       + pgvector
+                        │              │
+                        │       ┌──────┴──────┐
+                        │       │             │
+                        │    Vectors      Chat Memory
+                        │
+                        └── local inference
 ```
 
-n8n runs inside Docker/Colima.
+**Local:** Ollama, n8n, Docker/Colima, Python, and source documents.
 
-Ollama runs directly on macOS.
+**Cloud:** Supabase PostgreSQL/pgvector, document vectors, and chat memory.
+
+Ollama performs LLM inference and embedding generation locally. Supabase provides the persistent database and vector storage.
 
 ## RAG Chat Workflow
 
 ```text
-When chat message received
-            │
-            ▼
-         AI Agent
-        /    │     \
-       ▼     ▼      ▼
-   Ollama  Postgres  Supabase
-    Chat     Chat     Vector
-   Model    Memory     Store
-                       │
-                       ▼
-                Ollama Embeddings
+User question
+      │
+      ▼
+   AI Agent
+   ┌──┼──────────────┐
+   │  │              │
+   ▼  ▼              ▼
+Ollama  Chat       Supabase
+Qwen3   Memory     Vector Store
+   │                   │
+   │             Ollama Embeddings
+   │                   │
+   └─────────┬─────────┘
+             ▼
+          Answer
 ```
 
 The AI Agent uses:
 
-- `qwen3:1.7b` for local generation
+- `qwen3:1.7b` for local answer generation
+- `nomic-embed-text` for local query embeddings
+- Supabase Vector Store for retrieval
 - PostgreSQL-backed chat memory
-- Supabase Vector Store as the retrieval tool
 
-For document-related questions, the agent is instructed to retrieve
-relevant context before answering.
-
-The current Vector Store retrieval limit is **2 chunks**.
+The current retrieval limit is **2 chunks**.
 
 ## Document Ingestion
 
 ```text
-Manual Trigger
-      ↓
-Read File(s) from Disk
-      ├──────────────→ Merge
-      ↓
-Postgres
-      └──────────────→ Merge
-                         ↓
-                  Wait for both
-                         ↓
-              Supabase Vector Store
-                    ↑           ↑
-                    │           │
-              Data Loader   Ollama Embeddings
+Local PDF
+   │
+   ▼
+n8n Data Loader
+   │
+   ├── Load & split
+   │
+   ▼
+Ollama / nomic-embed-text
+   │
+   │ embeddings
+   ▼
+Supabase pgvector
 ```
 
 The ingestion workflow:
 
-1.  Reads a PDF from the local `documents` directory.
-2.  Uses the filename as `source` metadata.
-3.  Deletes existing chunks for that source.
-4.  Loads and splits the document.
-5.  Generates embeddings with `nomic-embed-text`.
-6.  Stores the chunks and embeddings in Supabase pgvector.
+1. Reads PDFs from the local `documents/` directory.
+2. Uses the filename as `source` metadata.
+3. Removes existing chunks for that source.
+4. Loads and splits the document.
+5. Generates embeddings locally.
+6. Stores chunks and embeddings in Supabase.
+
+Re-ingesting a document replaces its existing chunks, preventing duplicate vectors. Multiple documents can coexist in the same vector store.
 
 Example metadata:
 
@@ -98,102 +104,88 @@ Example metadata:
 }
 ```
 
-This makes re-ingestion idempotent: re-ingesting the same document
-replaces its existing chunks rather than creating duplicates.
-
-Multiple documents can coexist in the same vector store. Ingesting one
-document does not delete another document's chunks.
-
-## Retrieval Flow
+## Retrieval
 
 ```text
-User question
-      ↓
-   AI Agent
-      ↓
-Query embedding
-      ↓
-Supabase Vector Store
-      ↓
+Question
+   │
+   ▼
+Ollama / nomic-embed-text
+   │
+   │ query embedding
+   ▼
+Supabase / pgvector
+   │
+   │ similarity search
+   ▼
 Relevant chunks
-      ↓
-   AI Agent
-      ↓
-Qwen3 1.7B
-      ↓
-   Answer
+   │
+   ▼
+AI Agent
+   │
+   ▼
+Ollama / qwen3:1.7b
+   │
+   ▼
+Answer
 ```
 
-The Supabase Vector Store uses Ollama embeddings for the query and
-performs vector similarity search against the `documents` table.
-
-The current database contains document chunks with:
+The `documents` table contains:
 
 - text content
 - JSON metadata
 - 768-dimensional embeddings
 
-The `match_documents` function provides the vector similarity search
-used by the Supabase Vector Store.
+The `match_documents` function performs the vector similarity search used by the Supabase Vector Store.
 
 ## Chat Memory
 
-PostgreSQL-backed n8n Chat Memory stores conversational history.
+n8n uses PostgreSQL-backed chat memory:
 
 ```text
 Chat Trigger
-      ↓
-   AI Agent
-      │
-      ▼
+     ↓
+  AI Agent
+     ↓
 Postgres Chat Memory
-      │
-      ▼
+     ↓
 Supabase PostgreSQL
 ```
 
-Memory was tested independently and together with RAG. The agent can use
-previous conversation context while retrieving information from the
-vector store.
+Conversation history is therefore stored in Supabase rather than locally.
 
 ## Models
 
-### Chat model
+### Chat
 
 ```text
 qwen3:1.7b
 ```
 
-Current settings:
+Current configuration:
 
 - thinking disabled
-- concise 3--5 bullet responses
+- concise 3–5 bullet responses
 
-### Embedding model
+### Embeddings
 
 ```text
 nomic-embed-text
 ```
 
-Embedding dimension:
-
-```text
-768
-```
+Embedding dimension: **768**
 
 Other models tested during development:
 
-Model Size Approx. RAG time Result
+| Model        | Approx. RAG time | Result                              |
+| ------------ | ---------------: | ----------------------------------- |
+| Llama 3.1 8B |     ~5 min 5 sec | Correct retrieval and summarization |
+| Llama 3.2 3B |    ~2 min 26 sec | Correct retrieval and summarization |
+| Qwen3 1.7B   |           ~2 min | Usable retrieval and answer         |
 
----
+After disabling thinking and reducing retrieval from 4 to 2 chunks, Qwen3 executions were approximately **34–40 seconds**, with roughly **1,100–1,300 tokens** on the development machine.
 
-Llama 3.1 8B \~5 min 5 sec Correct retrieval and summarization
-Llama 3.2 3B \~2 min 26 sec Correct retrieval and summarization
-Qwen3 1.7B \~2 min Usable retrieval and answer
-
-After disabling thinking and reducing retrieval from 4 chunks to 2,
-tested Qwen3 RAG executions were approximately **34--40 seconds**, with
-roughly **1,100--1,300 tokens**.
+These figures are development measurements, not general model benchmarks.
 
 ## Supabase
 
@@ -201,59 +193,52 @@ Supabase provides:
 
 - PostgreSQL
 - pgvector
-- document storage for chunks and embeddings
+- document chunk and embedding storage
 - vector similarity search
-- PostgreSQL storage for n8n chat memory
+- n8n chat memory
 
-The `documents` table uses a 768-dimensional vector column to match
-`nomic-embed-text`.
+The `documents` table uses a 768-dimensional vector column matching `nomic-embed-text`.
 
-## Local Networking
+Supabase is the **cloud component** of the current architecture. AI inference remains local.
+
+## Networking
 
 ```text
-Mac
+macOS
 │
 ├── Ollama :11434
-│      ▲
-│      │ host.docker.internal
-│      │
+│
 └── Colima
-       │
-       └── Docker
-              │
-              └── n8n :5678
+     │
+     └── Docker
+          │
+          └── n8n :5678
 ```
 
-Ollama on macOS:
-
-```text
-http://localhost:11434
-```
-
-Ollama from inside n8n:
+Ollama is exposed to n8n through:
 
 ```text
 http://host.docker.internal:11434
 ```
 
-n8n:
+n8n is available locally at:
 
 ```text
 http://localhost:5678
 ```
 
-Colima uses the gRPC port forwarder so published Docker ports are
-reachable from macOS:
+Colima uses the gRPC port forwarder:
 
 ```bash
 colima start --port-forwarder=grpc
 ```
 
+n8n connects to Supabase over the network for vector retrieval and chat memory.
+
 ## Python
 
-Python is currently used for local Ollama testing and experimentation.
+Python is used for local Ollama testing and experimentation.
 
-The Python Ollama client has been tested successfully against the local
-Ollama server.
+The Python Ollama client has been tested successfully against the local Ollama server.
 
 Python is not currently part of the main n8n RAG execution path.
