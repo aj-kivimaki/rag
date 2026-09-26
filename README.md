@@ -50,6 +50,16 @@ The core RAG workflow is working end-to-end.
 
 The workflow has been tested with multiple documents, re-ingestion, vector retrieval, and conversational memory.
 
+## Workflow Screenshots
+
+### RAG Chat
+
+![RAG Chat workflow](pics/RAG-chat.png)
+
+### Document Ingestion
+
+![RAG Document Ingestion workflow](pics/RAG-ingest-documents.png)
+
 ## Local AI
 
 The current chat model is `qwen3:1.7b`.

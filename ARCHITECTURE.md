@@ -2,6 +2,20 @@
 
 This document describes the architecture of the RAG system. The [README](README.md) covers the project overview, setup, and current status.
 
+## Workflow Screenshots
+
+### RAG Chat
+
+![RAG Chat workflow](pics/RAG-chat-flow.png)
+
+### RAG Ingest Documents
+
+![RAG Ingest Documents workflow](pics/RAG-ingest-documents-flow.png)
+
+### RAG Response
+
+![RAG response](pics/RAG-response.png)
+
 ## System Architecture
 
 ```text
@@ -13,7 +27,7 @@ This document describes the architecture of the RAG system. The [README](README.
                  │                             │
           Local AI models                 Docker / n8n
                  │                             │
-          ┌──────┴──────┐              ┌──────┴──────┐
+          ┌──────┴──────┐              ┌──────-┴─────┐
           │             │              │             │
        Qwen3       Nomic Embed      RAG - Chat   RAG - Ingest
           │             │              │             │
